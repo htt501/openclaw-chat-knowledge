@@ -1,0 +1,13 @@
+{
+  "id": "openclaw-chat-knowledge",
+  "name": "Chat Knowledge",
+  "version": "1.0.0",
+  "description": "Search and analyze Feishu chat history",
+  "entry": "index.js",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "connectionString": { "type": "string", "default": "postgresql://localhost/chat_knowledge" }
+    }
+  }
+}
