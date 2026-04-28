@@ -8,9 +8,14 @@
 import { initPool, getUnanalyzed, markAnalyzed, insertDecision, insertTodo, insertRisk, updateEmbedding } from '../src/db.js';
 import { getEmbedding } from '../src/embedding.js';
 
-const LITELLM_URL = 'http://litellm-alb-1287056927.us-east-1.elb.amazonaws.com/v1/chat/completions';
-const LITELLM_KEY = 'sk-78nXoBVKz7XalDcDmb0Lyg';
-const MODEL = 'us.anthropic.claude-sonnet-4-5-20250929-v1:0';
+const LITELLM_URL = process.env.LITELLM_URL || 'http://litellm-alb-1287056927.us-east-1.elb.amazonaws.com/v1/chat/completions';
+const LITELLM_KEY = process.env.LITELLM_KEY;
+const MODEL = process.env.LITELLM_MODEL || 'us.anthropic.claude-sonnet-4-5-20250929-v1:0';
+
+if (!LITELLM_KEY) {
+  console.error('Error: LITELLM_KEY environment variable is required');
+  process.exit(1);
+}
 const BATCH_SIZE = 10;
 
 async function callLLM(prompt) {

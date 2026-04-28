@@ -7,11 +7,48 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/tao/.openclaw/extensions/openclaw-chat-knowledge/scripts/collect-v2.sh</string>
+        <string>/Users/tao/.openclaw/extensions/openclaw-chat-knowledge/scripts/collect-all.sh</string>
         <string>1</string>
     </array>
-    <key>StartInterval</key>
-    <integer>14400</integer>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Minute</key>
+            <integer>0</integer>
+            <key>Hour</key>
+            <integer>2</integer>
+        </dict>
+        <dict>
+            <key>Minute</key>
+            <integer>0</integer>
+            <key>Hour</key>
+            <integer>6</integer>
+        </dict>
+        <dict>
+            <key>Minute</key>
+            <integer>0</integer>
+            <key>Hour</key>
+            <integer>10</integer>
+        </dict>
+        <dict>
+            <key>Minute</key>
+            <integer>0</integer>
+            <key>Hour</key>
+            <integer>14</integer>
+        </dict>
+        <dict>
+            <key>Minute</key>
+            <integer>0</integer>
+            <key>Hour</key>
+            <integer>18</integer>
+        </dict>
+        <dict>
+            <key>Minute</key>
+            <integer>0</integer>
+            <key>Hour</key>
+            <integer>22</integer>
+        </dict>
+    </array>
     <key>RunAtLoad</key>
     <false/>
     <key>StandardOutPath</key>

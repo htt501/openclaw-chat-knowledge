@@ -1,95 +1,104 @@
 #!/bin/bash
-# 聊天记录采集 v2 — 使用 lark-cli 直接拉取，不依赖 agent
-# Usage: bash collect-v2.sh [days]
+# 聊天记录采集 v2 — lark-cli 自动翻页采集
+# Usage: bash collect-v2.sh [months]
 
 PSQL="/opt/homebrew/opt/postgresql@17/bin/psql"
 DB="chat_knowledge"
 CHAT_ID="oc_7b975ce73644030ddb8a284335af7002"
-CHAT_NAME="Z战队"
-DAYS=${1:-1}  # 默认采集最近 1 天
+MONTHS=${1:-6}
+START=$(date -v-${MONTHS}m -u +"%Y-%m-%dT00:00:00Z")
 LOG=~/.openclaw/logs/chat-collect.log
+TMPDIR=$(mktemp -d)
 
-echo "[$(date)] Starting collection (last ${DAYS} days)..." >> "$LOG"
+echo "[$(date)] Collecting ${MONTHS} months from ${START}..." >> "$LOG"
+echo "Collecting ${MONTHS} months of messages..."
 
-# 用 lark-cli 搜索消息，JSON 输出
-MESSAGES=$(lark-cli im +messages-search \
-  --chat-id "$CHAT_ID" \
-  --start-time "$(date -v-${DAYS}d +%s)000" \
-  --page-size 50 \
-  --page-all \
-  --format json 2>/dev/null)
+# Fetch all pages
+PAGE=0
+TOKEN=""
+TOTAL_FETCHED=0
 
-if [ -z "$MESSAGES" ]; then
-  echo "[$(date)] No messages fetched" >> "$LOG"
-  echo "No messages fetched"
-  exit 0
-fi
+while true; do
+  PAGE=$((PAGE + 1))
+  OUTFILE="$TMPDIR/page_${PAGE}.json"
+  
+  if [ -z "$TOKEN" ]; then
+    lark-cli im +chat-messages-list --chat-id "$CHAT_ID" --page-size 50 --sort asc --start "$START" --format json > "$OUTFILE" 2>/dev/null
+  else
+    lark-cli im +chat-messages-list --chat-id "$CHAT_ID" --page-size 50 --sort asc --start "$START" --page-token "$TOKEN" --format json > "$OUTFILE" 2>/dev/null
+  fi
+  
+  COUNT=$(python3 -c "import json; d=json.load(open('$OUTFILE')); print(len(d.get('data',{}).get('messages',[])))" 2>/dev/null)
+  HAS_MORE=$(python3 -c "import json; d=json.load(open('$OUTFILE')); print(d.get('data',{}).get('has_more',False))" 2>/dev/null)
+  TOKEN=$(python3 -c "import json; d=json.load(open('$OUTFILE')); print(d.get('data',{}).get('page_token',''))" 2>/dev/null)
+  
+  TOTAL_FETCHED=$((TOTAL_FETCHED + ${COUNT:-0}))
+  echo "  Page $PAGE: ${COUNT:-0} messages (total: $TOTAL_FETCHED)"
+  
+  if [ "$HAS_MORE" != "True" ] || [ -z "$TOKEN" ] || [ "$TOKEN" = "None" ]; then
+    break
+  fi
+  
+  sleep 1
+done
 
-# 解析 JSON，过滤 bot 消息，写入数据库
-COLLECTED=0
-SKIPPED=0
+echo "Fetched $TOTAL_FETCHED messages in $PAGE pages. Writing to DB..."
 
-echo "$MESSAGES" | python3 -c "
-import json, sys, subprocess
+# Parse all pages and write to DB
+TMPDIR_COLLECT="$TMPDIR" python3 << 'PYEOF'
+import json, subprocess, os, glob
 
 PSQL = '/opt/homebrew/opt/postgresql@17/bin/psql'
 DB = 'chat_knowledge'
 CHAT_ID = 'oc_7b975ce73644030ddb8a284335af7002'
 CHAT_NAME = 'Z战队'
+TMPDIR = os.environ.get('TMPDIR_COLLECT', '/tmp')
 
-# Bot open_ids to exclude
-BOT_IDS = {
-    'ou_7a553d49035adf0799489e3d10607ca7',  # 小吉
-    'ou_0420b35824c2dfdb5f725da699bdfbe4',  # 贝吉塔
-    'ou_5926ce30d9055a393eb760aba975c678',  # 布尔玛
-    'ou_ea7346e0cb6f1bf666cca7be0bfdaa61',  # 维斯
-    'ou_9df960e0dfa7b1a1d71839faeda967a1',  # 界王神
-    'ou_b4d850e6c7f0ff236de5221d940aae8d',  # 琪琪
-    'ou_244a2f68855048e7e4d730deecf6f793',  # 小Q
-}
+BOT_APP_IDS = {'cli_a3a28b6ce03bd00e', 'cli_a92f2ed996785bde', 'cli_a92d12ed88385bde', 'cli_a92d0eb0caf89bd3', 'cli_a92d68e588781bd2', 'cli_a93a5e6bc978dbd8', 'cli_a9300a2ac639dbca'}
 
 collected = 0
 skipped = 0
 
-try:
-    data = json.load(sys.stdin)
-    items = data if isinstance(data, list) else data.get('items', data.get('messages', []))
-except:
-    items = []
-
-for msg in items:
-    sender_id = msg.get('sender', {}).get('id', msg.get('sender_id', ''))
-    sender_type = msg.get('sender', {}).get('sender_type', msg.get('sender_type', ''))
-    
-    # Skip bot messages
-    if sender_type == 'app' or sender_id in BOT_IDS:
-        skipped += 1
-        continue
-    
-    msg_id = msg.get('message_id', '')
-    content = msg.get('body', {}).get('content', msg.get('content', ''))
-    sender_name = msg.get('sender', {}).get('name', msg.get('sender_name', 'unknown'))
-    send_time = msg.get('create_time', msg.get('send_time', ''))
-    
-    if not msg_id or not content or len(content) < 2:
-        skipped += 1
-        continue
-    
-    # Escape single quotes for SQL
-    content_safe = content.replace(\"'\", \"''\")
-    sender_name_safe = sender_name.replace(\"'\", \"''\")
-    
-    sql = f\"\"\"INSERT INTO chat_messages (message_id, chat_id, chat_name, sender_id, sender_name, content, send_time)
-VALUES ('{msg_id}', '{CHAT_ID}', '{CHAT_NAME}', '{sender_id}', '{sender_name_safe}', '{content_safe}', to_timestamp({send_time}::bigint/1000.0))
-ON CONFLICT (message_id) DO NOTHING;\"\"\"
-    
+for f in sorted(glob.glob(f'{TMPDIR}/page_*.json')):
     try:
-        subprocess.run([PSQL, '-d', DB, '-c', sql], capture_output=True, timeout=5)
-        collected += 1
+        data = json.load(open(f))
+        items = data.get('data', {}).get('messages', [])
     except:
-        pass
+        continue
+    
+    for msg in items:
+        sender = msg.get('sender', {})
+        sender_type = sender.get('sender_type', '')
+        sender_id = sender.get('id', '')
+        
+        if sender_type == 'app' or sender_id in BOT_APP_IDS:
+            skipped += 1
+            continue
+        
+        msg_id = msg.get('message_id', '')
+        content = msg.get('content', '')
+        create_time = msg.get('create_time', '')
+        
+        if not msg_id or not content or len(content) < 2:
+            skipped += 1
+            continue
+        
+        content_safe = content.replace("'", "''")
+        
+        sql = f"""INSERT INTO chat_messages (message_id, chat_id, chat_name, sender_id, sender_name, content, send_time)
+VALUES ('{msg_id}', '{CHAT_ID}', '{CHAT_NAME}', '{sender_id}', 'TAO', '{content_safe}', '{create_time}')
+ON CONFLICT (message_id) DO NOTHING;"""
+        
+        try:
+            r = subprocess.run([PSQL, '-d', DB, '-c', sql], capture_output=True, timeout=5)
+            if r.returncode == 0:
+                collected += 1
+        except:
+            pass
 
-print(f'Collected: {collected}, Skipped: {skipped}')
-" 2>&1
+print(f'Result: {collected} collected, {skipped} skipped')
+PYEOF
 
-echo "[$(date)] Collection done" >> "$LOG"
+# Cleanup
+rm -rf "$TMPDIR"
+echo "[$(date)] Done" >> "$LOG"
