@@ -4,7 +4,7 @@
 
 PSQL="/opt/homebrew/opt/postgresql@17/bin/psql"
 DB="chat_knowledge"
-LITELLM="${LITELLM_URL:-http://litellm-alb-1287056927.us-east-1.elb.amazonaws.com/v1/chat/completions}"
+LITELLM="${LITELLM_URL:?Error: LITELLM_URL environment variable is required}"
 LITELLM_KEY="${LITELLM_KEY:?Error: LITELLM_KEY environment variable is required}"
 MODEL="${LITELLM_MODEL:-us.anthropic.claude-sonnet-4-5-20250929-v1:0}"
 OLLAMA="http://localhost:11434/api/embeddings"
